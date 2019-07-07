@@ -1,0 +1,35 @@
+{
+  "name": "homebridge-switched-blinds",
+  "version": "1.0.0",
+  "description": "Homebridge Blinds Plugin",
+  "main": "index.js",
+  "engines": {
+    "homebridge": ">=0.3.2"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thncode/homebridge-switched-blinds.git"
+  },
+  "keywords": [
+    "homebridge",
+    "homebridge-plugin",
+    "blinder",
+    "shutter",
+    "HAP",
+    "window",
+    "cover"
+  ],
+  "author": "Thomas Nemec",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/PJCzx/homebridge-switched-blinds/issues"
+  },
+  "homepage": "https://github.com/PJCzx/homebridge-switched-blinds#readme",
+  "dependencies": {
+    "python-shell": "^0.4.0",
+    "request": "^2.78.0"
+  }
+}
