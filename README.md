@@ -1,0 +1,1 @@
+# homebridge-switched-blinds
