@@ -1,5 +1,6 @@
 var request = require("request");
-var PythonShell = require('python-shell');
+const fs = require('fs');
+const path = "/root/.homebridge/blinds";
 
 var Service, Characteristic;
 
@@ -7,7 +8,7 @@ module.exports = function(homebridge) {
 	console.log("homebridge API version: " + homebridge.version);
   Service = homebridge.hap.Service;
   Characteristic = homebridge.hap.Characteristic;
-  homebridge.registerAccessory("homebridge-switched-blinds", "SmartShades", SmartShades);
+  homebridge.registerAccessory("homebridge-switched-blinds", "SmartBlinds", SmartShades);
 };
 
 
@@ -16,21 +17,17 @@ function SmartShades(log, config) {
 	this.log = log;
 	this.name = config.name || "Window cover";
 	this.id = config.id || 0;
-	this.pythonScriptPath = config.pythonScriptPath;
-	this.pythonScriptName = config.pythonScriptName;
-	this.apiroute = config.apiroute;
-
+	this.filename = path + this.id + ".txt";
+	this.rfilename = path + this.id + "pos.txt";
+	this.readTime = 0;
 
 	// Required Characteristics
-	this.currentPosition = 100;
-	this.targetPosition = 100;
+	//this.currentPosition = 100;
+	//this.targetPosition = 100;
 
 	//Characteristic.PositionState.DECREASING = 0;
 	//Characteristic.PositionState.INCREASING = 1;
 	//Characteristic.PositionState.STOPPED = 2;
-
-	this.positionState = Characteristic.PositionState.STOPPED;
-	this.service.setCharacteristic(Characteristic.PositionState, Characteristic.PositionState.STOPPED);
 
 	// Optional Characteristics
 	//this.holdPosition = Characteristic.HoldPosition;
@@ -40,19 +37,71 @@ function SmartShades(log, config) {
 	//this.currentVerticalTiltAngle = Characteristic.CurrentVerticalTiltAngle;
 	//this.obstructionDetected = Characteristic.ObstructionDetected;
 
+	this.positionState = Characteristic.PositionState.STOPPED;
+	this.service.setCharacteristic(Characteristic.PositionState, Characteristic.PositionState.STOPPED);
+
+    this.readData();
+
+   	fs.watch(this.rfilename, (event, rfilename) => {
+   		if (event === 'change') this.readData();
+   	});
 }
 
+
+Number.prototype.pad = function(size) {
+  var s = String(this);
+  while (s.length < (size || 2)) {s = "0" + s;}
+  return s;
+}
+
+
 SmartShades.prototype = {
+	
 	//Start
 	identify: function(callback) {
 		this.log("Identify requested!");
+		pos = this.currentPosition.pad(3);
+		fs.writeFileSync(this.filename, pos, "utf-8");
 		callback(null);
 	},
+	
 	// Required
 	getCurrentPosition: function(callback) {
 		this.log("getCurrentPosition:", this.currentPosition);
 		var error = null;
 		callback(error, this.currentPosition);
+	},
+	
+	readData: function() {
+	    var data;
+	    try {
+    		data = fs.readFileSync(this.rfilename, "utf-8");
+    	} catch (err) {
+    	    this.log("file ", this.rfilename, "not found");
+    	    return;
+    	}
+		var lastSync = Date.parse(data.substring(0, 19));
+		if (this.readtime == lastSync) {
+		    //this.log(lastSync, "already read");
+		    return;
+		}
+		this.readtime = lastSync;
+
+		var position = parseFloat(data.substring(20));
+		if (isNaN(position)) {
+		    this.log("NaN");
+		    return;
+		}
+
+		this.currentPosition = this.targetPosition = position;
+		this.service.setCharacteristic(Characteristic.CurrentPosition, this.currentPosition);
+		this.log("current position is now %s", this.currentPosition);
+		this.positionState = Characteristic.PositionState.STOPPED;
+		this.service.setCharacteristic(Characteristic.PositionState, this.positionState);
+
+		this.service.getCharacteristic(Characteristic.PositionState).updateValue(this.positionState, null);
+		this.service.getCharacteristic(Characteristic.TargetPosition).updateValue(this.targetPosition, null);
+		this.service.getCharacteristic(Characteristic.CurrentPosition).updateValue(this.currentPosition, null);
 	},
 
 	getName: function(callback) {
@@ -68,67 +117,43 @@ SmartShades.prototype = {
 	},
 
 	setTargetPosition: function (value, callback) {
-		this.log("setTargetPosition from %s to %s", this.targetPosition, value);
+		this.stopped = this.positionState === Characteristic.PositionState.STOPPED;
+
+		this.reverse = false;
+		if (this.stopped) {
+			if (this.currentPosition > 0 && this.currentPosition < 100 && this.lastDirection == Characteristic.PositionState.DECREASING && value == 0) {
+				this.reverse = true;
+				//this.log("current position %s", this.currentPosition);
+				value = 100;
+			}
+			this.log("set target position from %s to %s", this.targetPosition, value);
+		}
+		else {
+			this.log("stopping from %s", this.lastDirection);
+		}
+
 		this.targetPosition = value;
 
-		if(this.targetPosition > this.currentPosition) {
-			this.service.setCharacteristic(Characteristic.PositionState, Characteristic.PositionState.INCREASING);
-		} else if(this.targetPosition < this.currentPosition) {
-			this.service.setCharacteristic(Characteristic.PositionState, Characteristic.PositionState.DECREASING);
-		} else if(this.targetPosition = this.currentPosition) {
-			this.service.setCharacteristic(Characteristic.PositionState, Characteristic.PositionState.STOPPED);
-		}		
-
-		//PYTHON 
-		if(this.pythonScriptPath !== undefined) {
-
-			var options = {};
-			options.args = this.targetPosition;
-			options.scriptPath = this.pythonScriptPath
-
-			PythonShell.run(this.pythonScriptName, options, function (err, results) {
-			  	if (err) {
-			  		this.log("Script Error", options.scriptPath, options.args, err);
-			  	 	callback(err);
-			  	} else {
-					// results is an array consisting of messages collected during execution
-				  	console.log('Success ! Results: %j', results);
-				  	this.currentPosition = this.targetPosition;
-				  	this.service.setCharacteristic(Characteristic.CurrentPosition, this.currentPosition);
-				  	this.log("currentPosition is now %s", this.currentPosition);
-					this.service.setCharacteristic(Characteristic.PositionState, Characteristic.PositionState.STOPPED);
-				  	callback(null); // success
-			  	}
-			}.bind(this));
-		} else if (this.apiroute !== undefined) {
-			//HTTP API ACTION
-			var url = this.apiroute + "/targetposition/"+ this.id + "/" + this.targetPosition;
-			this.log("GET", url);
-			request.get({
-				url: url
-			}, function(err, response, body) {
-				if (!err && response.statusCode == 200) {
-					this.log("Response success");
-					this.currentPosition = this.targetPosition;
-					this.service.setCharacteristic(Characteristic.CurrentPosition, this.currentPosition);
-					this.log("currentPosition is now %s", this.currentPosition);
-					this.service.setCharacteristic(Characteristic.PositionState, Characteristic.PositionState.STOPPED);
-					//doSuccess.bind(this);
-					callback(null); // success
-				} else {
-					this.log("Response error" , err);
-					callback(err);
-				}
-			}.bind(this));
-		} else {
-			//FAKE SUCCESS
-			this.log("Fake Success");
-			this.currentPosition = this.targetPosition;
-			this.service.setCharacteristic(Characteristic.CurrentPosition, this.currentPosition);
-			this.log("currentPosition is now %s", this.currentPosition);
-			this.service.setCharacteristic(Characteristic.PositionState, Characteristic.PositionState.STOPPED);
-			callback(null); // success
+		if (this.targetPosition < this.currentPosition) {
+			this.lastDirection = this.positionState = Characteristic.PositionState.DECREASING;
+			this.stopped = false;
+		} else if (this.targetPosition > this.currentPosition) {
+			this.lastDirection = this.positionState = Characteristic.PositionState.INCREASING;
+			this.stopped = false;
+		} else if (this.targetPosition = this.currentPosition) {
+			this.positionState = Characteristic.PositionState.STOPPED;
 		}
+		if (this.reverse) {
+			this.log("reverse");
+			this.lastDirection = this.positionState = Characteristic.PositionState.DECREASING;
+		}
+		this.service.setCharacteristic(Characteristic.PositionState, this.positionState);
+		this.service.getCharacteristic(Characteristic.PositionState).updateValue(this.positionState, null);
+		
+		pos = this.targetPosition.pad(3);
+		fs.writeFileSync(this.filename, pos, "utf-8");			
+		
+		callback(null); // success
 	},
 
 	getPositionState: function(callback) {
@@ -139,14 +164,12 @@ SmartShades.prototype = {
 
 	getServices: function() {
 
-		// you can OPTIONALLY create an information service if you wish to override
-		// the default values for things like serial number, model, etc.
 		var informationService = new Service.AccessoryInformation();
 
 		informationService
-			.setCharacteristic(Characteristic.Manufacturer, "HTTP Manufacturer")
-			.setCharacteristic(Characteristic.Model, "HTTP Model")
-			.setCharacteristic(Characteristic.SerialNumber, "HTTP Serial Number");
+			.setCharacteristic(Characteristic.Manufacturer, "Thomas Nemec")
+			.setCharacteristic(Characteristic.Model, "Jalousiesteuerung")
+			.setCharacteristic(Characteristic.SerialNumber, "1");
 
 		this.service
 			.getCharacteristic(Characteristic.Name)
