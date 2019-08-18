@@ -1,3 +1,5 @@
+// missing: blinds<x>pos.txt not existing > create
+
 var request = require("request");
 const fs = require('fs');
 const path = "/root/.homebridge/blinds";
